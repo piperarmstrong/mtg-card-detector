@@ -108,7 +108,7 @@ def flattener(image, pts, w, h):
       temp_rect[2] = pts[2][0]
       temp_rect[3] = pts[1][0]
 
-  maxWidth = 200
+  maxWidth = 300
   maxHeight = 300
 
   dst = np.array([[0,0],[maxWidth-1,0],[maxWidth-1,maxHeight-1],[0, maxHeight-1]], np.float32)
