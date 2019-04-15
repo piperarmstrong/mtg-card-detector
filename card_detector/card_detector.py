@@ -4,31 +4,34 @@ import imutils
 import copy
 
 class Query_card:
-    """Structure to store information about query cards in the camera image."""
+    """Structure to store information about cards in the camera image."""
 
     def __init__(self):
         self.contour = [] # Contour of card
         self.width, self.height, self.x, self.y = 0, 0, 0, 0 # Width and height of card
         self.corner_pts = [] # Corner points of card
         self.center = [] # Center point of card
-        self.warp = None # 100x150, flattened, grayed, blurred image
-        self.key_pts = None
-        self.descriptors = None
-        self.approx = []
+        self.warp = None # 300x300, warped image
+        self.key_pts = None #Not currently used. Sift Points?
+        self.descriptors = None #Same as above
+        self.approx = [] #The point approximation
 
 def preprocess_image(image):
-
+  """Take video frame and prepare it to find contours (threshold, edge detection, or similar)"""
   gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-  blur = cv2.GaussianBlur(gray,(5,5),0)
+  #blur = cv2.GaussianBlur(gray,(5,5),0)
 
-#  clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-#  clahe_output = clahe.apply(gray)
-  thresh = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_MEAN_C,cv2.THRESH_BINARY,11,2)
+  #clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+  #clahe_output = clahe.apply(gray)
+  #thresh = cv2.adaptiveThreshold(gray,255,cv2.ADAPTIVE_THRESH_MEAN_C,cv2.THRESH_BINARY,11,2)
+  #thresh = cv2.Canny(image,10,150,apertureSize=3)
 
-#  thresh = cv2.Canny(image,25,400)
-#  lines = cv2.HoughLines(t,1,np.pi/180,200)
+  #Najma's thresholding below
+  blur= cv2.GaussianBlur(gray,(1,1),1000)
+  flag, thresh= cv2.threshold(blur,60,255, cv2.THRESH_BINARY)#2nd arguement 50 works well
 
-  #cv2.imshow('canny',thresh)
+  #Display the image being used to find contours. Comment out for final display  
+  cv2.imshow('canny',thresh)
   key = cv2.waitKey(1) & 0xFF
   if key == ord("q"):
     cam_quit = 1  
@@ -36,6 +39,7 @@ def preprocess_image(image):
   return thresh
 
 def preprocess_card(contour, image):
+  """Use contour of card to make a Query_card"""
   qCard = Query_card()
   qCard.contour = contour
 
@@ -67,7 +71,7 @@ def preprocess_card(contour, image):
   qCard.center = [cent_x, cent_y]
   if len(pts) == 4: 
     qCard.warp = flattener(image, pts, w, h)
-    orb =  cv2.ORB_create()
+    #orb =  cv2.ORB_create()
     qCard.tracker = cv2.TrackerKCF.create()
     qCard.tracker.init(image, (y,x,w,h))
     #qCard.key_pts, qCard.descriptors = orb.detectAndCompute(qCard.warp,None)
@@ -76,8 +80,10 @@ def preprocess_card(contour, image):
   return qCard
 
 def flattener(image, pts, w, h):
+  '''Get a color image of the card to be identified'''
   temp_rect = np.zeros((4,2),dtype="float32")
   
+  #Determine points and how best to warp
   tl = pts[0]
   br = pts[2]
   tr = pts[1]
@@ -111,6 +117,7 @@ def flattener(image, pts, w, h):
   maxWidth = 300
   maxHeight = 300
 
+  # Warp image to maxWidth and maxHeight
   dst = np.array([[0,0],[maxWidth-1,0],[maxWidth-1,maxHeight-1],[0, maxHeight-1]], np.float32)
   M = cv2.getPerspectiveTransform(temp_rect,dst)
   warp = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
@@ -119,12 +126,18 @@ def flattener(image, pts, w, h):
   return warp
 
 def find_cards(thresh_image):
+  '''Find cards in the provided image'''
 
-  CARD_MAX_AREA = 7500
-  CARD_MIN_AREA = 6000  
+  #The maximum area that could be a card.
+  CARD_MAX_AREA = 7000
+  #The minimum area that could be a card.
+  CARD_MIN_AREA = 5000  
 
+  #Get countours from the image
   dummy,cnts,hier = cv2.findContours(thresh_image,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
   index_sort = sorted(range(len(cnts)),key=lambda i : cv2.contourArea(cnts[i]),reverse=True)
+
+  #If there are no contours, return
   if len(cnts) == 0:
     return [], []
 
@@ -136,6 +149,7 @@ def find_cards(thresh_image):
     cnts_sort.append(cnts[i])
     hier_sort.append(hier[0][i])
 
+  #Check through the contours to find rectangular contours within the correct area
   for i in range(len(cnts_sort)):
     size = cv2.contourArea(cnts_sort[i])
  
@@ -144,16 +158,8 @@ def find_cards(thresh_image):
       approx = cv2.approxPolyDP(cnts_sort[i],0.12*peri,True)
       if len(approx) == 4:
         cnt_is_card[i] = 1
-        print(size)
 
   return cnts_sort, cnt_is_card
-
-def draw_results(image, qCard):
-  x = qCard.center[0]
-  y = qCard.center[1]
-  cv2.circle(image,(x,y),5,(255,0,0),-1)
-
-  return image
 
 def compare_cards(card1, card2):
   inside = is_same_card(card1,card2)
@@ -184,14 +190,20 @@ def compare_cards(card1, card2):
   return None''' 
 
 def contains(card1, card2):
-  if card1.approx[0][0][0] > card2.approx[0][0][0] and card1.approx[0][0][1] > card2.approx[0][0][1]:
-    if card1.approx[1][0][0] < card2.approx[1][0][0] and card1.approx[1][0][1] > card2.approx[1][0][1]:
-      if card1.approx[2][0][0] > card2.approx[2][0][0] and card1.approx[2][0][1] < card2.approx[2][0][1]:
-        if card1.approx[3][0][0] < card2.approx[3][0][0] and card1.approx[3][0][1] < card2.approx[3][0][1]:    
-          return True
-  return False
+  '''Check if card 2 contains card 1 by comparing corner points'''
+  if card1.approx[0][0][0] < card2.approx[0][0][0] or card1.approx[0][0][1] < card2.approx[0][0][1]:
+      return False
+  if card1.approx[1][0][0] > card2.approx[1][0][0] or card1.approx[1][0][1] < card2.approx[1][0][1]:
+      return False
+
+  if card1.approx[2][0][0] < card2.approx[2][0][0] or card1.approx[2][0][1] > card2.approx[2][0][1]:
+      return False
+  if card1.approx[3][0][0] > card2.approx[3][0][0] or card1.approx[3][0][1] > card2.approx[3][0][1]:    
+      return False
+  return True
 
 def is_same_card(card1, card2):
+  '''Determine if two cards are the same card'''
   pts1 = card1.approx
   pts2 = card2.approx
 
@@ -274,71 +286,10 @@ def compare_all_cards(all_cards, new_cards, image):
     temp.append(all_cards[-1])
   all_cards = temp
 
-  
-  '''if len(new_cards) < 1:
-    return (all_cards)
-  these_cards = []
-  num_cards = len(new_cards)
-  
-  #Deal with multiple outlines being assigned to a single card.
-  #Keep the outer outline in case we've grabbed just the explanation section
-  if num_cards > 1:
-    cards = list(range(num_cards))
-
-    for i in range(num_cards):
-      for j in range(num_cards):
-        if j > i:
-          if is_same_card(new_cards[cards[i]],new_cards[cards[j]]) is 0:
-            cards[i] = j
-          if is_same_card(new_cards[i],new_cards[j]) is 1:
-            cards[j] = i
-    cards = set(cards)
-    for i in cards:
-      these_cards.append(new_cards[i])
-    new_cards = these_cards   
-
-  cards = np.zeros(shape=(len(new_cards),len(all_cards)))  
-
-  # Check corner points of the old cards and new cards to see if any should correspond to each other.
-  for i, new_card in enumerate(new_cards):
-    for j, card in enumerate(all_cards):
-      keep = compare_cards(new_card,card)
-      cards[i][j] = keep
-
-  keep_cards = []
-  cards = np.transpose(cards)
-
-  # If there is no card in the new set corresponding to the old set, keep the card in the old set
-  #TODO: Check the area around these cards for interesting features that correspond to the card
-  #If there aren't enough matching features, assume the card has been removed from play
-  for i in range(len(all_cards)):
-    m = np.min(cards[i])
-    if m > 200:
-      new_cards.append(all_cards[i])
-
-
-  #Check again to see if there are cards inside other cards, and keep the larger card outline
-  num_cards = len(new_cards)
-  if num_cards > 1:
-    these_cards = []
-    cards = list(range(num_cards))
-
-    for i in range(num_cards):
-      for j in range(num_cards):
-        if j > i:
-          if is_same_card(new_cards[cards[i]],new_cards[cards[j]]) is 0:
-            cards[i] = j
-          if is_same_card(new_cards[i],new_cards[j]) is 1:
-            cards[j] = i
-    cards = set(cards)
-    for i in cards:
-      these_cards.append(new_cards[i])
-    new_cards = these_cards'''
-  #print(len(new_cards))
-  #print(len(all_cards))
   return all_cards
 
 def get_contour(q):
+  '''Create a contour from a queryCard'''
   return np.array([[q.x,q.y],[(q.x+q.width),q.y],[(q.x+q.width),(q.y+q.height)],[q.x,(q.y+q.height)]],dtype=np.int32)
 
 all_cards = []
@@ -360,7 +311,6 @@ while cap.isOpened() and f<2000:
       temp = preprocess_card(cnts_sort[i],frame)
       if temp is not None:
         new_cards.append(temp)
-      #image = draw_results(image, new_cards[-1])
 
   all_cards = compare_all_cards(all_cards,new_cards,image)
   temp_cnts = []
