@@ -123,7 +123,7 @@ def find_cards(thresh_image):
   CARD_MAX_AREA = 7500
   CARD_MIN_AREA = 6000  
 
-  dummy,cnts,hier = cv2.findContours(thresh_image,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
+  cnts,hier = cv2.findContours(thresh_image,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
   index_sort = sorted(range(len(cnts)),key=lambda i : cv2.contourArea(cnts[i]),reverse=True)
   if len(cnts) == 0:
     return [], []
