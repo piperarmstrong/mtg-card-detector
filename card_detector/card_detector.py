@@ -16,9 +16,21 @@ class Query_card:
         self.descriptors = None #Same as above
         self.approx = [] #The point approximation
 
-def preprocess_image(image):
+def preprocess_image(image,red=False):
   """Take video frame and prepare it to find contours (threshold, edge detection, or similar)"""
-  gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+  if red:
+    gray = image[:,:,2]
+    limit = 90
+  else:
+    gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray,(1,1),1000)
+    limit = 50
+
+  blue = image[:,:,0]
+  green = image[:,:,1]
+  red = image[:,:,2]
+
+
   #blur = cv2.GaussianBlur(gray,(5,5),0)
 
   #clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
@@ -27,8 +39,9 @@ def preprocess_image(image):
   #thresh = cv2.Canny(image,10,150,apertureSize=3)
 
   #Najma's thresholding below
-  blur= cv2.GaussianBlur(gray,(1,1),1000)
-  flag, thresh= cv2.threshold(blur,60,255, cv2.THRESH_BINARY)#2nd arguement 50 works well
+  
+
+  flag, thresh= cv2.threshold(gray,limit,255, cv2.THRESH_BINARY)#2nd arguement 50 works well
 
   #Display the image being used to find contours. Comment out for final display  
   cv2.imshow('canny',thresh)
@@ -131,7 +144,7 @@ def find_cards(thresh_image):
   #The maximum area that could be a card.
   CARD_MAX_AREA = 7000
   #The minimum area that could be a card.
-  CARD_MIN_AREA = 5000  
+  CARD_MIN_AREA = 4200  
 
   #Get countours from the image
   dummy,cnts,hier = cv2.findContours(thresh_image,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
@@ -170,36 +183,17 @@ def compare_cards(card1, card2):
   xDiff = card1.x - card2.x
   yDiff = card1.y - card2.y
   diff = np.max(np.abs([heightDiff,widthDiff,xDiff,yDiff]))
-  #print(heightDiff,widthDiff,xDiff,yDiff)
-  #diff = np.abs(card1.corner_pts - card2.corner_pts)
-  #print("diff",diff)
   if diff < 20:
     return 1
   return 0
-  #return np.max(diff)
-  
-'''def is_same_card(card1, card2):
-  pts1 = card1.approx
-  pts2 = card2.approx
-  
-  if contains(card1, card2):
-    return 1
-  if contains(card2, card1):
-    return 0
-  
-  return None''' 
 
 def contains(card1, card2):
   '''Check if card 2 contains card 1 by comparing corner points'''
-  if card1.approx[0][0][0] < card2.approx[0][0][0] or card1.approx[0][0][1] < card2.approx[0][0][1]:
-      return False
-  if card1.approx[1][0][0] > card2.approx[1][0][0] or card1.approx[1][0][1] < card2.approx[1][0][1]:
-      return False
 
-  if card1.approx[2][0][0] < card2.approx[2][0][0] or card1.approx[2][0][1] > card2.approx[2][0][1]:
-      return False
-  if card1.approx[3][0][0] > card2.approx[3][0][0] or card1.approx[3][0][1] > card2.approx[3][0][1]:    
-      return False
+  if card1.y < card2.y or card1.y+card1.height > card2.y+card2.height:
+    return False
+  if card1.x < card2.x or card1.x+card1.width > card2.x+card2.width:
+    return False
   return True
 
 def is_same_card(card1, card2):
@@ -297,17 +291,27 @@ all_cards = []
 cap = cv2.VideoCapture("../2018 Magic World Championship Finals.mp4")
 
 cap.set(cv2.CAP_PROP_POS_FRAMES, 4789)
+sec = 1/cap.get(cv2.CAP_PROP_FPS)
+
 f=0
 while cap.isOpened() and f<2000:
   f+=1
   ret, frame = cap.read()
   image = np.copy(frame)
 
+  new_cards = []
   pre_proc = preprocess_image(frame)
   cnts_sort, cnt_is_card = find_cards(pre_proc)
-  new_cards = []
   for i in range(len(cnts_sort)):
     if cnt_is_card[i] == 1:
+      temp = preprocess_card(cnts_sort[i],frame)
+      if temp is not None:
+        new_cards.append(temp)
+
+  pre_proc = preprocess_image(frame,True)
+  cnts_sort, cnt_is_card = find_cards(pre_proc)
+  for i in range(len(cnts_sort)):
+    if cnt_is_card[i]:
       temp = preprocess_card(cnts_sort[i],frame)
       if temp is not None:
         new_cards.append(temp)
