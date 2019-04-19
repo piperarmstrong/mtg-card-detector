@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import imutils
 import copy
+import math
 
 class Query_card:
     """Structure to store information about cards in the camera image."""
@@ -16,14 +17,20 @@ class Query_card:
         self.descriptors = None #Same as above
         self.approx = [] #The point approximation
 
-def preprocess_image(image,red=False):
+def preprocess_image(image,color=None):
   """Take video frame and prepare it to find contours (threshold, edge detection, or similar)"""
-  if red:
+  if color == "red":
     gray = image[:,:,2]
-    limit = 90
+    limit = 110
+  elif color == "blue":
+    gray = image[:,:,0]
+    limit = 110
+  elif color == "green":
+    gray = image[:,:,1]
+    limit = 110
   else:
     gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray,(1,1),1000)
+    #gray = cv2.GaussianBlur(gray,(1,1),1000)
     limit = 50
 
   blue = image[:,:,0]
@@ -51,46 +58,100 @@ def preprocess_image(image,red=False):
 
   return thresh
 
+def e_distance(pt1,pt2):
+  return math.sqrt((pt1[0]-pt2[0])**2+(pt1[1]-pt2[1])**2)
+
 def preprocess_card(contour, image):
-  """Use contour of card to make a Query_card"""
-  qCard = Query_card()
-  qCard.contour = contour
-
+  """Use contour (or contours) of card to make a Query_card"""
+  qCards = []
+  contours = []
   peri = cv2.arcLength(contour,True)
-  approx = cv2.approxPolyDP(contour,0.12*peri,True)
+  approx = cv2.approxPolyDP(contour,0.02*peri,True)
+  cards = []
+  distance = 100000
+  pt = -1
+  direction = 1
+  #Check if the outline is a single card or multiple overlapping cards
+  if len(approx) > 7 and len(approx)%4 is 0:
+    corners = len(approx)
+    overlappedCards = corners//4
+    for i in range(overlappedCards):
+      contours.append([])    
+    #Find the intersection of two cards
+    for i in range(corners//2):
+      opposite = (i + corners//2)%corners
+      temp_dist = e_distance(approx[i][0],approx[opposite][0])
+      if temp_dist < distance:
+        distance = temp_dist
+        pt = i
+    old_dist = 0
+    index = 0
+    #Add the points to each card
+    for i in range(overlappedCards*2):
+      pt1 = (pt + 2*i)%corners
+      pt2 = (pt1 + 1)%corners
+      pt3 = (pt2 + 1)%corners
+      new_dist = e_distance(approx[pt1][0],approx[pt3][0])
+      if new_dist > old_dist or old_dist is 0:
+        direction *= -1
+      else:
+        index += direction
+        if index < 0:
+          index = overlappedCards-1
+        elif index >= overlappedCards:
+          index = 0
+      contours[index].append(approx[pt1])
+      contours[index].append(approx[pt2])
+      contours[index].append(approx[pt3])
+      old_dist = new_dist
+  else:
+    #If it's a single card, just append it
+    size = cv2.contourArea(approx)
+    #if size > 7500:
+    #  y,x,w,h = cv2.boundingRect(approx)
+    #  temp = image[x:x+w,y:y+h]
+    #  gray = cv2.cvtColor(temp,cv2.COLOR_BGR2GRAY)
+    #  dummy,thresh = cv2.threshold(gray,175,255, cv2.THRESH_BINARY)
+    #  cv2.imshow("big cards",thresh)
+    #  cv2.waitKey(1)
+    contours.append(cv2.approxPolyDP(contour,0.12*peri,True))
+  for contour in contours:
+    contour = np.array(contour)
+    qCard = Query_card()
+    qCard.contour = np.array(contour)
+    peri = cv2.arcLength(np.array(contour),True)
 
-  pts = approx
-  s = np.sum(pts, axis = 2)
-  tl = pts[np.argmin(s)]
-  br = pts[np.argmax(s)]
-  diff = np.diff(pts, axis = -1)
-  tr = pts[np.argmin(diff)]
-  bl = pts[np.argmax(diff)]
-  cont = np.copy(approx)
-  qCard.approx = np.array([tl,tr,bl,br])
-  pts = np.float32(approx)
-  qCard.corner_pts = pts
+    pts = approx
+    s = np.sum(pts, axis = 2)
+    tl = pts[np.argmin(s)]
+    br = pts[np.argmax(s)]
+    diff = np.diff(pts, axis = -1)
+    tr = pts[np.argmin(diff)]
+    bl = pts[np.argmax(diff)]
+    cont = np.copy(approx)
+    qCard.approx = np.array([tl,tr,bl,br])
+    pts = np.float32(approx)
+    qCard.corner_pts = pts
 
 
-  y,x,w,h = cv2.boundingRect(contour)
-  qCard.width, qCard.height, qCard.y, qCard.x = w,h,x,y
+    y,x,w,h = cv2.boundingRect(contour)
+    qCard.width, qCard.height, qCard.y, qCard.x = w,h,x,y
   
-  if h/w > 2 or h/w < 1/3:
-    pass #return None
+    if h/w > 2 or h/w < 1/3:
+      pass #return None
 
-  average = np.sum(pts, axis=0)/len(pts)
-  cent_x = int(average[0][0])
-  cent_y = int(average[0][1])
-  qCard.center = [cent_x, cent_y]
-  if len(pts) == 4: 
-    qCard.warp = flattener(image, pts, w, h)
-    #orb =  cv2.ORB_create()
-    qCard.tracker = cv2.TrackerKCF.create()
-    qCard.tracker.init(image, (y,x,w,h))
-    #qCard.key_pts, qCard.descriptors = orb.detectAndCompute(qCard.warp,None)
-    #if qCard.descriptors is None:
-    #  pass #return None
-  return qCard
+    average = np.sum(pts, axis=0)/len(pts)
+    cent_x = int(average[0][0])
+    cent_y = int(average[0][1])
+    qCard.center = [cent_x, cent_y]
+    if len(pts) >= 4:
+      qCard.warp = flattener(image, pts, w, h)
+      #orb =  cv2.ORB_create()
+      qCard.tracker = cv2.TrackerKCF.create()
+      qCard.tracker.init(image, (y,x,w,h))
+      #qCard.key_pts, qCard.descriptors = orb.detectAndCompute(qCard.warp,None)
+      qCards.append(qCard)
+  return qCards
 
 def flattener(image, pts, w, h):
   '''Get a color image of the card to be identified'''
@@ -142,9 +203,9 @@ def find_cards(thresh_image):
   '''Find cards in the provided image'''
 
   #The maximum area that could be a card.
-  CARD_MAX_AREA = 7000
+  CARD_MAX_AREA = 15500
   #The minimum area that could be a card.
-  CARD_MIN_AREA = 4200  
+  CARD_MIN_AREA = 4200
 
   #Get countours from the image
   dummy,cnts,hier = cv2.findContours(thresh_image,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
@@ -279,7 +340,7 @@ def compare_all_cards(all_cards, new_cards, image):
   if keepme:
     temp.append(all_cards[-1])
   all_cards = temp
-
+  return new_cards
   return all_cards
 
 def get_contour(q):
@@ -291,6 +352,7 @@ all_cards = []
 cap = cv2.VideoCapture("../2018 Magic World Championship Finals.mp4")
 
 cap.set(cv2.CAP_PROP_POS_FRAMES, 4789)
+cap.set(cv2.CAP_PROP_POS_FRAMES, 7000)
 sec = 1/cap.get(cv2.CAP_PROP_FPS)
 
 f=0
@@ -302,19 +364,21 @@ while cap.isOpened() and f<2000:
   new_cards = []
   pre_proc = preprocess_image(frame)
   cnts_sort, cnt_is_card = find_cards(pre_proc)
+  #if np.sum(cnts_sort) > 1:
+  #  exit
   for i in range(len(cnts_sort)):
     if cnt_is_card[i] == 1:
       temp = preprocess_card(cnts_sort[i],frame)
-      if temp is not None:
-        new_cards.append(temp)
+      for card in temp:
+        new_cards.append(card)
 
-  pre_proc = preprocess_image(frame,True)
+  pre_proc = preprocess_image(frame,"red")
   cnts_sort, cnt_is_card = find_cards(pre_proc)
   for i in range(len(cnts_sort)):
     if cnt_is_card[i]:
       temp = preprocess_card(cnts_sort[i],frame)
-      if temp is not None:
-        new_cards.append(temp)
+      for card in temp:
+        new_cards.append(card)
 
   all_cards = compare_all_cards(all_cards,new_cards,image)
   temp_cnts = []
